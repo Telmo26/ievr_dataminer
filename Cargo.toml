@@ -1,0 +1,8 @@
+[package]
+name = "ievr_dataminer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ievr_cfg_bin_editor_core = { path = "../ievr_cfg_bin_editor/ievr_cfg_bin_editor-core" }
+memmap2 = "0.9"
