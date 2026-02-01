@@ -1,2 +1,4 @@
 /target
 *.cfg.bin
+/extracted
+/data
