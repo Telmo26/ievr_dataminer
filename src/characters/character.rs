@@ -1,16 +1,18 @@
 #[derive(Debug)]
 pub struct Character {
-    pub(super) index: i32,
-    pub(super) name_id: i32,
-    pub(super) element: Element,
-    pub(super) main_position: Position,
-    pub(super) alt_position: Position,
-    pub(super) style: Style,
-    pub(super) series_id: i32,
+    pub index: i32,
+    pub name_id: i32,
+    pub element: Element,
+    pub main_position: Position,
+    pub alt_position: Position,
+    pub style: Style,
+    pub lvl50_stats: Stats,
+    pub lvl99_stats: Stats,
+    pub series_id: i32,
     
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Element {
     WIND = 1,
     FOREST = 2,
@@ -31,7 +33,8 @@ impl From<i32> for Element {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Position {
     GK = 1,
     DF = 4,
@@ -52,7 +55,7 @@ impl From<i32> for Position {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Style {
     BREACH = 0,
     COUNTER = 1,
@@ -75,4 +78,15 @@ impl From<i32> for Style {
             _ => Style::UNKNOWN
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Stats {
+    pub kick: u16,
+    pub control: u16,
+    pub technique: u16,
+    pub pressure: u16,
+    pub physical: u16,
+    pub agility: u16,
+    pub intelligence: u16,
 }

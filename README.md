@@ -2,4 +2,4 @@
 
 # Miscellaneous
 
-- From Zukan (Inazugle) ID 3647 and onwards, due to an error by the team making the website, the actual indexes used by the game are one point lower.
+- The Inazugle (Zukan) IDs are somewhat correlated to the internal IDs the game uses, but it is not 1-to-1
