@@ -6,7 +6,7 @@ use ievr_cfg_bin_editor_core::{Row, Table, Value};
 mod character;
 
 pub use character::Character;
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Connection, Result, Statement, Transaction, params};
 
 pub use crate::{characters::character::{Element, Position, Stats, Style}, common::parse_gamefile};
 
@@ -18,8 +18,16 @@ pub const CHARA_REQUIRED_FILES: [&str; 3] = [
     "growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$"
 ];
 
-pub fn populate_character_data(extraction_path: &Path, character_database: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<i32>) {
+pub fn populate_character_data(extraction_path: &Path, mut character_database: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<i32>) {
+    // Database operations
     initialize_database(&character_database).unwrap();
+
+    character_database.pragma_update(None, "journal_mode", "WAL").unwrap();
+    character_database.pragma_update(None, "synchronous", "NORMAL").unwrap();
+
+    let tx = character_database.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive).unwrap();
+    
+    let (mut char_stmt, mut hero_stmt, mut basara_stmt) = prepare_statements(&tx);
 
     let root_path= extraction_path.to_path_buf().join(CHARA_ROOT_PATH);
 
@@ -48,50 +56,15 @@ pub fn populate_character_data(extraction_path: &Path, character_database: Conne
         let chara_base_id = parse_int_value(&row.values[0][0]);
 
         for row in chara_param_info.rows() {
-            if parse_int_value(&row.values[1][0]) == chara_base_id {
-                let skill_slice: Vec<i32> = row.values[23..=28].iter()// We filter by making sure the character has a second technique path
-                    .flatten()
-                    .map(parse_int_value)
-                    .collect();
-
-                if skill_slice.iter().any(|v| *v == 0) { continue }
-
-                let element = Element::from(parse_int_value(&row.values[2][0]));
-                let main_position = Position::from(parse_int_value(&row.values[3][0]));
-                let alt_position = Position::from(parse_int_value(&row.values[4][0]));
-                let style = Style::from(parse_int_value(&row.values[5][0]));
-
-                let growth_pattern = parse_int_value(&row.values[7][0]) as u8;
-
-                let chara_rank = parse_int_value(&row.values[9][0]) as u8;
-
-                let (lvl50_stats, lvl99_stats) = if main_position != Position::UNKNOWN {
-                    match growth_hash_table.get(&(main_position as u8, growth_pattern, chara_rank)) {
-                        Some(v) => *v,
-                        None => panic!("No value found for {:?}", (main_position as u8, growth_pattern, chara_rank))
-                    }
-                } else {
-                    (Stats::default(), Stats::default())
-                };
-
+            if parse_int_value(&row.values[1][0]) == chara_base_id && 
+                let Some(character) = extract_character(index, name_id, series_id, row, &growth_hash_table) 
+            {
                 let rarity = parse_int_value(&row.values[41][0]);
-
-                let character = Character {
-                    index,
-                    name_id,
-                    element,
-                    main_position,
-                    alt_position,
-                    style,
-                    lvl50_stats,
-                    lvl99_stats,
-                    series_id,
-                };
-
+                
                 let result = match rarity {
-                    0 => insert_character(&character_database, &character, "characters"),
-                    5..8 => insert_character(&character_database, &character, "heroes"),
-                    8 => insert_character(&character_database, &character, "basaras"),
+                    0 => insert_character(&mut char_stmt, &character),
+                    5..8 => insert_character(&mut hero_stmt, &character),
+                    8 => insert_character(&mut basara_stmt, &character),
                     _ => unreachable!()
                 };
 
@@ -101,6 +74,10 @@ pub fn populate_character_data(extraction_path: &Path, character_database: Conne
             }
         }
     };
+
+    drop(char_stmt); drop(hero_stmt); drop(basara_stmt);
+
+    tx.commit().unwrap();
 }
 
 fn get_characters(chara_base_info: &Table) -> Vec<&Row> {
@@ -166,6 +143,45 @@ fn parse_growth_table(growth_table_main: &Table) -> HashMap<(u8, u8, u8), (Stats
     };
 
     growth_hash_table
+}
+
+fn extract_character(index: i32, name_id: i32, series_id: i32, row: &Row, growth_hash_table: &HashMap<(u8, u8, u8), (Stats, Stats)>) -> Option<Character> {
+    let skill_slice: Vec<i32> = row.values[23..=28].iter()// We filter by making sure the character has a second technique path
+        .flatten()
+        .map(parse_int_value)
+        .collect();
+
+    if skill_slice.iter().any(|v| *v == 0) { return None }
+
+    let element = Element::from(parse_int_value(&row.values[2][0]));
+    let main_position = Position::from(parse_int_value(&row.values[3][0]));
+    let alt_position = Position::from(parse_int_value(&row.values[4][0]));
+    let style = Style::from(parse_int_value(&row.values[5][0]));
+
+    let growth_pattern = parse_int_value(&row.values[7][0]) as u8;
+
+    let chara_rank = parse_int_value(&row.values[9][0]) as u8;
+
+    let (lvl50_stats, lvl99_stats) = if main_position != Position::UNKNOWN {
+        match growth_hash_table.get(&(main_position as u8, growth_pattern, chara_rank)) {
+            Some(v) => *v,
+            None => unreachable!()
+        }
+    } else {
+        (Stats::default(), Stats::default())
+    };
+
+    Some(Character {
+        index,
+        name_id,
+        element,
+        main_position,
+        alt_position,
+        style,
+        lvl50_stats,
+        lvl99_stats,
+        series_id,
+    })
 }
 
 fn initialize_database(database: &Connection) -> Result<()> {
@@ -259,9 +275,9 @@ fn initialize_database(database: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn insert_character(conn: &Connection, c: &Character, database_name: &str) -> rusqlite::Result<()> {
-    let sql = format!("
-        INSERT INTO {database_name} (
+fn prepare_statements<'a>(tx: &'a Transaction<'_>) -> (Statement<'a>, Statement<'a>, Statement<'a>) {
+    let char_stmt = tx.prepare("
+        INSERT INTO characters (
             index_id, name_id, element, main_position, alt_position, style, series_id,
             lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
             lvl50_physical, lvl50_agility, lvl50_intelligence,
@@ -269,11 +285,35 @@ fn insert_character(conn: &Connection, c: &Character, database_name: &str) -> ru
             lvl99_physical, lvl99_agility, lvl99_intelligence
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
                     ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
-    );
+                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)").unwrap();
 
-    conn.execute(
-        &sql,
+    let hero_stmt = tx.prepare("
+        INSERT INTO heroes (
+            index_id, name_id, element, main_position, alt_position, style, series_id,
+            lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
+            lvl50_physical, lvl50_agility, lvl50_intelligence,
+            lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
+            lvl99_physical, lvl99_agility, lvl99_intelligence
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)").unwrap();
+    
+    let basara_stmt = tx.prepare("
+        INSERT INTO basaras (
+            index_id, name_id, element, main_position, alt_position, style, series_id,
+            lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
+            lvl50_physical, lvl50_agility, lvl50_intelligence,
+            lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
+            lvl99_physical, lvl99_agility, lvl99_intelligence
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)").unwrap();
+
+    (char_stmt, hero_stmt, basara_stmt)
+}
+
+fn insert_character(stmt: &mut Statement<'_>, c: &Character) -> rusqlite::Result<()> {
+    stmt.execute(
         params![
             c.index,
             c.name_id,

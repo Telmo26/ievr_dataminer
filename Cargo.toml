@@ -8,4 +8,4 @@ crossbeam = "0.8.4"
 ievr_cfg_bin_editor_core = { path = "../ievr_cfg_bin_editor/ievr_cfg_bin_editor-core" }
 memmap2 = "0.9"
 regex = "1.12.2"
-rusqlite = "0.38.0"
+rusqlite = {version = "0.38.0", features = ["bundled"]}
