@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::{Path, PathBuf}};
 
 use crossbeam::channel::Sender;
 use ievr_cfg_bin_editor_core::{Row, Table, Value};
@@ -10,20 +10,26 @@ use rusqlite::{Connection, Result, params};
 
 pub use crate::{characters::character::{Element, Position, Stats, Style}, common::parse_gamefile};
 
-const CHARA_BASE_PATH: &str = "extracted/data/common/gamedata/character/chara_base_1.03.98.00.cfg.bin";
-const CHARA_PARAMS_PATH: &str = "extracted/data/common/gamedata/character/chara_param_1.03.66.00.cfg.bin";
-const GROWTH_TABLE_CONFIG: &str = "extracted/data/common/gamedata/character/growth_table_config_0.00.00.00.cfg.bin";
+pub const CHARA_ROOT_PATH: &str = "data/common/gamedata/character/";
 
-pub fn populate_character_data(character_database: Connection, char_name_req_tx: Sender<i32>) {
+pub const CHARA_REQUIRED_FILES: [&str; 3] = [
+    "^chara_base_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
+    "^chara_param_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
+    "growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$"
+];
+
+pub fn populate_character_data(extraction_path: &Path, character_database: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<i32>) {
     initialize_database(&character_database).unwrap();
 
-    let chara_base = parse_gamefile(&PathBuf::from(CHARA_BASE_PATH)).unwrap();
+    let root_path= extraction_path.to_path_buf().join(CHARA_ROOT_PATH);
+
+    let chara_base = parse_gamefile(&PathBuf::from(root_path.join(&requested_files[0]))).unwrap();
     let chara_base_info = chara_base.table("CHARA_BASE_INFO").unwrap();
 
-    let chara_param = parse_gamefile(&PathBuf::from(CHARA_PARAMS_PATH)).unwrap();
+    let chara_param = parse_gamefile(&PathBuf::from(root_path.join(&requested_files[1]))).unwrap();
     let chara_param_info = chara_param.table("CHARA_PARAM_INFO").unwrap();
 
-    let growth_table = parse_gamefile(&PathBuf::from(GROWTH_TABLE_CONFIG)).unwrap();
+    let growth_table = parse_gamefile(&PathBuf::from(root_path.join(&requested_files[2]))).unwrap();
     let growth_table_main = growth_table.table("m_growthTableMainList").unwrap();
 
     let growth_hash_table = parse_growth_table(growth_table_main);    

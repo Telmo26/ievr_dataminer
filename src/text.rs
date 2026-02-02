@@ -1,10 +1,22 @@
+use std::path::Path;
+
 use crossbeam::channel::Receiver;
 use rusqlite::{Connection, Result};
 
-pub fn populate_text_data(text_databases: Vec<Connection>, char_name_req_rx: Receiver<i32>) {
-    initialize_databases(text_databases).unwrap();
+pub const TEXT_LANGUAGES: [&str; 9] = [
+    "de", "en", "es", "fr", "it", "ja", "pt", "zh_hans", "zh_hant"
+];
 
-    while let Ok(request) = char_name_req_rx.recv() {
+pub const TEXT_ROOT_PATH: &str = "data/common/text";
+
+pub const TEXT_REQUIRED_FILES: [&str; 3] = [
+    "^chara_text.cfg.bin$", "^chara_text_roma.cfg.bin$", "^skill_text.cfg.bin$"
+];
+
+pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec<Connection>, requested_files: Vec<String>, char_name_req_rx: Receiver<i32>) {
+    initialize_databases(text_database_connections).unwrap();
+
+    while let Ok(_request) = char_name_req_rx.recv() {
         
     }
 }
