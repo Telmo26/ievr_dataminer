@@ -63,6 +63,8 @@ pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec
             d.write_character_roma(&char_requests);
         });
     }
+
+    println!("[TEXT]: {} requested name(s) not found.", databases[0].get_missing_names());
 }
 
 fn initialize_databases(text_databases: &Vec<Connection>) -> Result<()> {
