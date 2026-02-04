@@ -1,5 +1,5 @@
 /target
 *.cfg.bin
 /extracted
-/data
+/output
 /.cargo

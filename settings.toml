@@ -1,0 +1,14 @@
+[datamining]
+# The path where the databases will be outputted
+output_folder = "output"
+
+# The folder in which the game files are extracted
+extraction_folder = "extracted"
+
+[extraction]
+# The root folder of your game
+game_folder = ""
+
+# Extractor parameters
+threads = "auto"
+memory = "auto"
