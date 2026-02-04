@@ -179,6 +179,7 @@ dependencies = [
 [[package]]
 name = "ievr_cfg_bin_editor_core"
 version = "0.1.0"
+source = "git+https://github.com/Telmo26/ievr_cfg_bin_editor.git?branch=main#d9c3c8bebb58755a8326aeef78cf6998d7e9a592"
 dependencies = [
  "crc-fast",
  "serde",
