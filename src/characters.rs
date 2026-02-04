@@ -6,8 +6,9 @@ use ievr_cfg_bin_editor_core::{Row, Table, Value};
 mod character;
 
 pub use character::Character;
-use rusqlite::{Connection, Result, Statement, Transaction, params};
+use rusqlite::{Connection, Result, params};
 
+use crate::common::{parse_byte_value, parse_int_value};
 pub use crate::{characters::character::{Element, Position, Stats, Style}, common::parse_gamefile};
 
 pub const CHARA_ROOT_PATH: &str = "data/common/gamedata/character/";
@@ -18,16 +19,12 @@ pub const CHARA_REQUIRED_FILES: [&str; 3] = [
     "growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$"
 ];
 
-pub fn populate_character_data(extraction_path: &Path, mut character_database: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<i32>) {
+pub fn populate_character_data(extraction_path: &Path, mut character_database_connection: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<i32>) {
     // Database operations
-    initialize_database(&character_database).unwrap();
+    initialize_database(&character_database_connection).unwrap();
 
-    character_database.pragma_update(None, "journal_mode", "WAL").unwrap();
-    character_database.pragma_update(None, "synchronous", "NORMAL").unwrap();
-
-    let tx = character_database.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive).unwrap();
-    
-    let (mut char_stmt, mut hero_stmt, mut basara_stmt) = prepare_statements(&tx);
+    character_database_connection.pragma_update(None, "journal_mode", "WAL").unwrap();
+    character_database_connection.pragma_update(None, "synchronous", "NORMAL").unwrap();
 
     let root_path= extraction_path.to_path_buf().join(CHARA_ROOT_PATH);
 
@@ -44,72 +41,77 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database: C
 
     let chara_base_info = get_characters(&chara_base_info);
 
+    #[cfg(debug_assertions)]
+    println!("Nb of characters: {}", chara_base_info.len());
+
+    let mut char_buffer = Vec::with_capacity(1000);
+    let mut hero_buffer = Vec::with_capacity(100);
+    let mut basara_buffer = Vec::with_capacity(100);
+
+    let mut missed_characters = 0;
+
     for row in chara_base_info {
-        let index = parse_int_value(&row.values[21][0]);
+        let index = parse_int_value(&row.values[2][0]);
 
         let name_id = parse_int_value(&row.values[3][0]);
-
-        char_name_req_tx.send(name_id).unwrap();
 
         let series_id = parse_int_value(&row.values[15][0]);
 
         let chara_base_id = parse_int_value(&row.values[0][0]);
+        let mut found_char = false;
 
         for row in chara_param_info.rows() {
-            if parse_int_value(&row.values[1][0]) == chara_base_id && 
-                let Some(character) = extract_character(index, name_id, series_id, row, &growth_hash_table) 
-            {
-                let rarity = parse_int_value(&row.values[41][0]);
-                
-                let result = match rarity {
-                    0 => insert_character(&mut char_stmt, &character),
-                    5..8 => insert_character(&mut hero_stmt, &character),
-                    8 => insert_character(&mut basara_stmt, &character),
-                    _ => unreachable!()
-                };
+            if parse_int_value(&row.values[1][0]) == chara_base_id {                
+                if let Some(character) = extract_character(index, name_id, series_id, row, &growth_hash_table) {
+                    let rarity = parse_int_value(&row.values[41][0]);
 
-                if result.is_err() {
-                    eprintln!("Duplicate for player ID {}", index)
-                }
+                    if !found_char {
+                        char_name_req_tx.send(name_id).unwrap();
+                        found_char = true;
+                    }
+                
+                    match rarity {
+                        0 => char_buffer.push(character),
+                        5..8 => hero_buffer.push(character), // insert_character(&mut hero_stmt, &character),
+                        8 => basara_buffer.push(character),// insert_character(&mut basara_stmt, &character),
+                        _ => unreachable!()
+                    };
+                } 
             }
+
+            if char_buffer.len() >= 1000 {
+                insert_characters(&mut character_database_connection, &char_buffer).unwrap();
+                char_buffer.clear();
+            } 
+        }
+
+        if !found_char {
+            missed_characters += 1;
+            println!("Didn't find base character {chara_base_id}, {missed_characters} misses");
         }
     };
 
-    drop(char_stmt); drop(hero_stmt); drop(basara_stmt);
-
-    tx.commit().unwrap();
+    insert_characters(&mut character_database_connection, &char_buffer).unwrap();
+    insert_heroes(&mut character_database_connection, &hero_buffer).unwrap();
+    insert_basaras(&mut character_database_connection, &basara_buffer).unwrap();
 }
 
 fn get_characters(chara_base_info: &Table) -> Vec<&Row> {
     let mut filtered_table: Vec<&Row> = chara_base_info.rows().iter()
-        .filter(|row| match row.values[21][0] {
+        .filter(|row| match row.values[2][0] {
             Value::Int(v) => v > 0, // We only want the characters who have a valid index
             _ => unreachable!()
         })
         .collect();
 
     filtered_table.sort_by_key(|row| {
-        match row.values[21][0] {
+        match row.values[2][0] {
             Value::Int(v) => v, // We also sort by index while we're at it
             _ => unreachable!()
         }
     });
 
     filtered_table
-}
-
-fn parse_int_value(value: &Value) -> i32 {
-    match value {
-        Value::Int(v) => *v,
-        _ => unreachable!()
-    }
-}
-
-fn parse_byte_value(value: &Value) -> u8 {
-    match value {
-        Value::Byte(v) => *v,
-        _ => unreachable!()
-    }
 }
 
 fn parse_growth_table(growth_table_main: &Table) -> HashMap<(u8, u8, u8), (Stats, Stats)> {
@@ -146,12 +148,17 @@ fn parse_growth_table(growth_table_main: &Table) -> HashMap<(u8, u8, u8), (Stats
 }
 
 fn extract_character(index: i32, name_id: i32, series_id: i32, row: &Row, growth_hash_table: &HashMap<(u8, u8, u8), (Stats, Stats)>) -> Option<Character> {
+    let rarity = parse_int_value(&row.values[41][0]);
+
     let skill_slice: Vec<i32> = row.values[23..=28].iter()// We filter by making sure the character has a second technique path
         .flatten()
         .map(parse_int_value)
         .collect();
 
-    if skill_slice.iter().any(|v| *v == 0) { return None }
+    if (rarity == 0 || rarity == 8 ) &&                 // Heroes do not have a second technique path
+        skill_slice.iter().any(|v| *v == 0) { 
+            return None 
+        } 
 
     let element = Element::from(parse_int_value(&row.values[2][0]));
     let main_position = Position::from(parse_int_value(&row.values[3][0]));
@@ -275,70 +282,153 @@ fn initialize_database(database: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn prepare_statements<'a>(tx: &'a Transaction<'_>) -> (Statement<'a>, Statement<'a>, Statement<'a>) {
-    let char_stmt = tx.prepare("
-        INSERT INTO characters (
-            index_id, name_id, element, main_position, alt_position, style, series_id,
-            lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
-            lvl50_physical, lvl50_agility, lvl50_intelligence,
-            lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
-            lvl99_physical, lvl99_agility, lvl99_intelligence
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                    ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)").unwrap();
+fn insert_characters(conn: &mut Connection, characters: &Vec<Character>) -> rusqlite::Result<()> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?;
 
-    let hero_stmt = tx.prepare("
-        INSERT INTO heroes (
-            index_id, name_id, element, main_position, alt_position, style, series_id,
-            lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
-            lvl50_physical, lvl50_agility, lvl50_intelligence,
-            lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
-            lvl99_physical, lvl99_agility, lvl99_intelligence
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                    ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)").unwrap();
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO characters (
+                index_id, name_id, element, main_position, alt_position, style, series_id,
+                lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
+                lvl50_physical, lvl50_agility, lvl50_intelligence,
+                lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
+                lvl99_physical, lvl99_agility, lvl99_intelligence
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                        ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                        ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            ON CONFLICT(index_id) DO NOTHING"
+        )?;
+
+        for c in characters {
+            stmt.execute(
+                params![
+                    c.index,
+                    c.name_id,
+                    c.element as i32,
+                    c.main_position as i32,
+                    c.alt_position as i32,
+                    c.style as i32,
+                    c.series_id,
+
+                    c.lvl50_stats.kick,
+                    c.lvl50_stats.control,
+                    c.lvl50_stats.technique,
+                    c.lvl50_stats.pressure,
+                    c.lvl50_stats.physical,
+                    c.lvl50_stats.agility,
+                    c.lvl50_stats.intelligence,
+
+                    c.lvl99_stats.kick,
+                    c.lvl99_stats.control,
+                    c.lvl99_stats.technique,
+                    c.lvl99_stats.pressure,
+                    c.lvl99_stats.physical,
+                    c.lvl99_stats.agility,
+                    c.lvl99_stats.intelligence,
+                ],
+            )?;
+        }
+    }
     
-    let basara_stmt = tx.prepare("
-        INSERT INTO basaras (
-            index_id, name_id, element, main_position, alt_position, style, series_id,
-            lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
-            lvl50_physical, lvl50_agility, lvl50_intelligence,
-            lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
-            lvl99_physical, lvl99_agility, lvl99_intelligence
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                    ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                    ?15, ?16, ?17, ?18, ?19, ?20, ?21)").unwrap();
-
-    (char_stmt, hero_stmt, basara_stmt)
+    tx.commit()
 }
 
-fn insert_character(stmt: &mut Statement<'_>, c: &Character) -> rusqlite::Result<()> {
-    stmt.execute(
-        params![
-            c.index,
-            c.name_id,
-            c.element as i32,
-            c.main_position as i32,
-            c.alt_position as i32,
-            c.style as i32,
-            c.series_id,
+fn insert_heroes(conn: &mut Connection, characters: &Vec<Character>) -> rusqlite::Result<()> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?;
 
-            c.lvl50_stats.kick,
-            c.lvl50_stats.control,
-            c.lvl50_stats.technique,
-            c.lvl50_stats.pressure,
-            c.lvl50_stats.physical,
-            c.lvl50_stats.agility,
-            c.lvl50_stats.intelligence,
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO heroes (
+                index_id, name_id, element, main_position, alt_position, style, series_id,
+                lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
+                lvl50_physical, lvl50_agility, lvl50_intelligence,
+                lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
+                lvl99_physical, lvl99_agility, lvl99_intelligence
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                        ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                        ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
+        )?;
 
-            c.lvl99_stats.kick,
-            c.lvl99_stats.control,
-            c.lvl99_stats.technique,
-            c.lvl99_stats.pressure,
-            c.lvl99_stats.physical,
-            c.lvl99_stats.agility,
-            c.lvl99_stats.intelligence,
-        ],
-    )?;
-    Ok(())
+        for c in characters {
+            stmt.execute(
+                params![
+                    c.index,
+                    c.name_id,
+                    c.element as i32,
+                    c.main_position as i32,
+                    c.alt_position as i32,
+                    c.style as i32,
+                    c.series_id,
+
+                    c.lvl50_stats.kick,
+                    c.lvl50_stats.control,
+                    c.lvl50_stats.technique,
+                    c.lvl50_stats.pressure,
+                    c.lvl50_stats.physical,
+                    c.lvl50_stats.agility,
+                    c.lvl50_stats.intelligence,
+
+                    c.lvl99_stats.kick,
+                    c.lvl99_stats.control,
+                    c.lvl99_stats.technique,
+                    c.lvl99_stats.pressure,
+                    c.lvl99_stats.physical,
+                    c.lvl99_stats.agility,
+                    c.lvl99_stats.intelligence,
+                ],
+            )?;
+        }
+    }
+    
+    tx.commit()
+}
+
+fn insert_basaras(conn: &mut Connection, characters: &Vec<Character>) -> rusqlite::Result<()> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?;
+
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO basaras (
+                index_id, name_id, element, main_position, alt_position, style, series_id,
+                lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
+                lvl50_physical, lvl50_agility, lvl50_intelligence,
+                lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
+                lvl99_physical, lvl99_agility, lvl99_intelligence
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                        ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                        ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
+        )?;
+
+        for c in characters {
+            stmt.execute(
+                params![
+                    c.index,
+                    c.name_id,
+                    c.element as i32,
+                    c.main_position as i32,
+                    c.alt_position as i32,
+                    c.style as i32,
+                    c.series_id,
+
+                    c.lvl50_stats.kick,
+                    c.lvl50_stats.control,
+                    c.lvl50_stats.technique,
+                    c.lvl50_stats.pressure,
+                    c.lvl50_stats.physical,
+                    c.lvl50_stats.agility,
+                    c.lvl50_stats.intelligence,
+
+                    c.lvl99_stats.kick,
+                    c.lvl99_stats.control,
+                    c.lvl99_stats.technique,
+                    c.lvl99_stats.pressure,
+                    c.lvl99_stats.physical,
+                    c.lvl99_stats.agility,
+                    c.lvl99_stats.intelligence,
+                ],
+            )?;
+        }
+    }
+    
+    tx.commit()
 }
