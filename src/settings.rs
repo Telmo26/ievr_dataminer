@@ -18,6 +18,10 @@ impl Settings {
         let mut settings = String::new();
         settings_file.read_to_string(&mut settings).map_err(|e| SettingsError::IOError(e))?;
 
+        println!("{settings}");
+
+        settings = settings.replace(r"\", r"\\"); // This solves escaping issues on Windows
+
         let settings_table = match settings.parse::<toml::Table>() {
             Ok(table) => table,
             Err(_) => return Err(SettingsError::TomlParseError)

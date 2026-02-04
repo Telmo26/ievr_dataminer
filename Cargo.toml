@@ -3,6 +3,14 @@ name = "ievr_dataminer"
 version = "1.0.0"
 edition = "2024"
 
+[profile.dist]
+inherits = "release"  # Start with standard release settings
+lto = true            # Maximum cross-crate code stripping
+codegen-units = 1     # Better optimization at the cost of compile time
+panic = "abort"       # Removes "unwinding" code (big size win)
+strip = true          # Removes debug symbols automatically
+opt-level = "s"       # "z" focuses on binary size, "s" focuses on speed/size balance
+
 [dependencies]
 crossbeam = "0.8.4"
 memmap2 = "0.9"

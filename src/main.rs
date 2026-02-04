@@ -7,7 +7,7 @@ mod common;
 mod file_operations;
 mod settings;
 
-use std::{fs, io::{Read, Write}, path::{Path, PathBuf}, process::exit, sync::Arc, thread::{self, JoinHandle}};
+use std::{fs, io::Write, path::{Path, PathBuf}, process::exit, sync::Arc, thread::{self, JoinHandle}};
 
 use file_operations::{
     create_required_files,

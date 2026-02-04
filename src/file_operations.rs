@@ -16,7 +16,7 @@ pub fn create_required_files(output_folder: &Path) {
         fs::remove_dir_all(output_folder).unwrap();
     }
 
-    fs::create_dir(output_folder).unwrap();
+    fs::create_dir_all(output_folder).unwrap();
 
     for database_path in DATABASES {
         let mut clone = output_folder.to_path_buf();
