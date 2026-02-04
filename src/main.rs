@@ -6,6 +6,7 @@ mod text;
 mod common;
 mod file_operations;
 mod settings;
+mod tools;
 
 use std::{fs, io::Write, path::{Path, PathBuf}, process::exit, sync::Arc, thread::{self, JoinHandle}};
 
@@ -28,7 +29,9 @@ use text::{
     TEXT_REQUIRED_FILES,
 };
 
-use crate::settings::Settings;
+use settings::Settings;
+
+use tools::Tools;
 
 const DATABASES: [&str; 11] = [
     "characters.sqlite",
@@ -74,13 +77,24 @@ fn main() {
     let (char_name_req_tx, char_name_req_rx) = channel::unbounded();
 
     // We verify the presence of all required files
-    let mut files_to_extract = get_missing_character_rules(&extraction_root_path);    
-    files_to_extract.extend(get_missing_text_rules(&extraction_root_path));
+    let mut rules_to_extract = get_missing_character_rules(&extraction_root_path);    
+    rules_to_extract.extend(get_missing_text_rules(&extraction_root_path));
 
     #[cfg(debug_assertions)]
-    println!("Rules not fullfilled: {:#?}", files_to_extract);
+    println!("Rules not fullfilled: {:#?}", rules_to_extract);
+
+    // We initialize the required tools
+    let tools = Tools::new();
 
     // We extract missing files
+    if !rules_to_extract.is_empty() {
+        println!("Missing files, starting game extraction...\n");
+        if tools.extract(&settings, rules_to_extract).is_ok() {
+            println!("\nGame extraction done.\n")
+        };
+    }
+
+    println!("Starting game data mining...");
 
     // We start the different threads
     let character_thread = create_character_thread(&output_folder_path, &extraction_root_path, char_name_req_tx);
@@ -89,6 +103,8 @@ fn main() {
     // We wait for the program to finish
     let _ = character_thread.join();
     let _ = text_thread.join();
+
+    println!("\nGame data mining done. Please open the \"{}\" folder to get the databases.", &settings.output_folder);
 }
 
 fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_tx: Sender<i32>) -> JoinHandle<()> {
@@ -133,7 +149,6 @@ fn get_missing_character_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'sta
             if files.len() < CHARA_REQUIRED_FILES.len() { // We compute the rules not fullfilled
                 for rule in CHARA_REQUIRED_FILES {
                     if !files.iter().any(|(r, _)| *r == rule) {
-                        println!("Rule {rule} not fullfilled, requires extraction");
                         missing_rules.push(rule);
                     }
                 }
@@ -159,7 +174,6 @@ fn get_missing_text_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'static s
                     let mut missing = false;
                     for language in TEXT_LANGUAGES {
                         if !files.iter().any(|(r, s)| *r == rule && s.starts_with(language)) {
-                            println!("Rule {rule} not fullfilled for language \"{language}\", requires extraction");
                             missing = true;
                             break;
                         }

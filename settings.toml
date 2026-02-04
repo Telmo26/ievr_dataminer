@@ -7,7 +7,7 @@ extraction_folder = "extracted"
 
 [extraction]
 # The root folder of your game
-game_folder = ""
+game_folder = "/run/media/eliott/AC6A06BD6A0683F4/Program Files (x86)/Steam/steamapps/common/INAZUMA ELEVEN Victory Road"
 
 # Extractor parameters
 threads = "auto"

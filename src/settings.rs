@@ -2,6 +2,7 @@ use std::{error::Error, fs::File, io::Read};
 
 use reqwest::blocking::Client;
 
+#[derive(Debug)]
 pub struct Settings {
     pub output_folder: String,
     pub extraction_folder: String,
@@ -17,8 +18,6 @@ impl Settings {
 
         let mut settings = String::new();
         settings_file.read_to_string(&mut settings).map_err(|e| SettingsError::IOError(e))?;
-
-        println!("{settings}");
 
         settings = settings.replace(r"\", r"\\"); // This solves escaping issues on Windows
 

@@ -48,7 +48,7 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
     let mut hero_buffer = Vec::with_capacity(100);
     let mut basara_buffer = Vec::with_capacity(100);
 
-    let mut missed_characters = 0;
+    let mut ignored_characters = 0;
 
     for row in chara_base_info {
         let index = parse_int_value(&row.values[2][0]);
@@ -86,14 +86,15 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
         }
 
         if !found_char {
-            missed_characters += 1;
-            println!("Didn't find base character {chara_base_id}, {missed_characters} misses");
+            ignored_characters += 1;
         }
     };
 
     insert_characters(&mut character_database_connection, &char_buffer).unwrap();
     insert_heroes(&mut character_database_connection, &hero_buffer).unwrap();
     insert_basaras(&mut character_database_connection, &basara_buffer).unwrap();
+
+    println!("[CHARACTERS]: {ignored_characters} character(s) ignored for being invalid.");
 }
 
 fn get_characters(chara_base_info: &Table) -> Vec<&Row> {

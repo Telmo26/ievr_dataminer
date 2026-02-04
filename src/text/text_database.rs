@@ -10,6 +10,8 @@ pub struct TextDatabase {
     chara: HashMap<i32, String>,
     chara_roma: HashMap<i32, String>,
     // skill_file: HashMap<i32, (String, String)>,
+
+    missing_character_names: u32,
 }
 
 impl TextDatabase {
@@ -47,7 +49,7 @@ impl TextDatabase {
             }
         }
         
-        TextDatabase { conn, chara, chara_roma }
+        TextDatabase { conn, chara, chara_roma, missing_character_names: 0 }
     }
 
     pub fn write_character(&mut self, index_batch: &Vec<i32>) {
@@ -63,7 +65,7 @@ impl TextDatabase {
             for index in index_batch {
                 if let Some(name) = self.chara.get(index) {
                     stmt.execute(params![index, name]).unwrap();
-                }
+                } else { self.missing_character_names += 1; }
             }
         }
         
@@ -95,6 +97,10 @@ impl TextDatabase {
         let _sql = "INSERT INTO skill_names (id, name, description) 
             VALUES (?1, ?2, ?3)
             ON CONFLICT(id) DO NOTHING";
+    }
+    
+    pub fn get_missing_names(&self) -> u32 {
+        self.missing_character_names
     }
 }
 
