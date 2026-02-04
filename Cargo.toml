@@ -1,11 +1,11 @@
 [package]
 name = "ievr_dataminer"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 crossbeam = "0.8.4"
-ievr_cfg_bin_editor_core = { path = "../ievr_cfg_bin_editor/ievr_cfg_bin_editor-core" }
 memmap2 = "0.9"
 regex = "1.12.2"
 rusqlite = {version = "0.38.0", features = ["bundled"]}
+ievr_cfg_bin_editor_core = { git = "https://github.com/Telmo26/ievr_cfg_bin_editor.git", branch = "main" }

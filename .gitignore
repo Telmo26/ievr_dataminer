@@ -2,3 +2,4 @@
 *.cfg.bin
 /extracted
 /data
+/.cargo
