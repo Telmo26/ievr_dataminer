@@ -1,4 +1,7 @@
-use std::{fs::{self, File}, io::{self, BufWriter, Write}, os::unix::fs::PermissionsExt, path::PathBuf, process::{Command, exit}};
+use std::{fs::{self, File}, io::{self, BufWriter, Write}, path::PathBuf, process::{Command, exit}};
+
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::PermissionsExt;
 
 use reqwest::blocking::Client;
 
