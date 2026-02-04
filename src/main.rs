@@ -88,7 +88,7 @@ fn main() {
 
     // We extract missing files
     if !rules_to_extract.is_empty() {
-        println!("Missing files, starting game extraction...\n");
+        println!("Missing game files, starting game extraction...\n");
         if tools.extract(&settings, rules_to_extract).is_ok() {
             println!("\nGame extraction done.\n")
         };
