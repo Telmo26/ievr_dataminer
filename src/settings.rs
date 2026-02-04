@@ -68,7 +68,7 @@ impl Settings {
 
     pub fn download() -> Result<(), Box<dyn std::error::Error>> {
         // 1. Define the URL and the destination path
-        let url = "https://raw.githubusercontent.com/Telmo26/ievr_dataminer/refs/heads/main/Cargo.toml";
+        let url = "https://raw.githubusercontent.com/Telmo26/ievr_dataminer/refs/heads/main/settings.toml";
         let target_path = "settings.toml";
 
         // 2. Create a client (GitHub likes a User-Agent header)
