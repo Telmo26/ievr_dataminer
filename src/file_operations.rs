@@ -1,8 +1,7 @@
-use std::{fs::{self, File}, path::{Path, PathBuf}};
+use std::{fs::{self, File}, path::Path};
 
 use crate::{
     DATABASES,
-    DATABASE_ROOT,
 
     CHARA_ROOT_PATH,
     CHARA_REQUIRED_FILES,
@@ -12,17 +11,15 @@ use crate::{
     TEXT_REQUIRED_FILES,
 };
 
-pub fn create_required_files() {
-    let root = PathBuf::from(DATABASE_ROOT);
-
-    if let Ok(true) = fs::exists(&root) {
-        fs::remove_dir_all(&root).unwrap();
+pub fn create_required_files(output_folder: &Path) {
+    if let Ok(true) = fs::exists(output_folder) {
+        fs::remove_dir_all(output_folder).unwrap();
     }
 
-    fs::create_dir(&root).unwrap();
+    fs::create_dir(output_folder).unwrap();
 
     for database_path in DATABASES {
-        let mut clone = root.clone();
+        let mut clone = output_folder.to_path_buf();
         clone.push(database_path);
 
         let parent = clone.parent().unwrap();
