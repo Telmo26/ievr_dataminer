@@ -1,4 +1,4 @@
-use std::{path::Path};
+use std::{collections::HashMap, path::Path, sync::LazyLock};
 
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
@@ -18,15 +18,23 @@ pub const TEXT_LANGUAGES: [&str; 9] = [
 
 pub const TEXT_ROOT_PATH: &str = "data/common/text";
 
-pub const TEXT_REQUIRED_FILES: [&str; 5] = [
-    "^chara_add_info_text.cfg.bin$",
-    "^chara_description_text.cfg.bin$",
-    "^chara_text.cfg.bin$", 
-    "^chara_text_roma.cfg.bin$", 
-    "^skill_text.cfg.bin$"
-];
+pub const TEXT_REQUIRED_FILES: LazyLock<HashMap<&'static str, HashMap<&'static str, &'static str>>> = LazyLock::new(|| {
+    let mut map = HashMap::with_capacity(TEXT_LANGUAGES.len());
 
-pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec<Connection>, requested_files: Vec<String>, char_name_req_rx: Receiver<(i32, i32)>) {
+    for language in TEXT_LANGUAGES {
+        map.insert(language, HashMap::new());
+        let language_map = map.get_mut(language).unwrap();
+
+        language_map.insert("chara_add_info",       "^chara_add_info_text.cfg.bin$");
+        language_map.insert("chara_description",    "^chara_description_text.cfg.bin$");
+        language_map.insert("chara_text",           "^chara_text.cfg.bin$");
+        language_map.insert("chara_text_roma",      "^chara_text_roma.cfg.bin$");
+        language_map.insert("skill_text",           "^skill_text.cfg.bin$");
+    };
+    map
+});
+
+pub fn populate_text_data(extraction_path: &Path, text_database_connections: HashMap<&'static str, Connection>, requested_files: HashMap<&'static str, HashMap<&'static str, String>>, char_name_req_rx: Receiver<(i32, i32)>) {
     assert!(text_database_connections.len() == TEXT_LANGUAGES.len());
 
     #[cfg(debug_assertions)]
@@ -34,14 +42,14 @@ pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec
 
     let root_path = extraction_path.join(TEXT_ROOT_PATH);
 
-    let mut databases: Vec<TextDatabase> = text_database_connections.into_par_iter().enumerate().map(|(i, conn)| {
+    let mut databases: Vec<TextDatabase> = text_database_connections.into_par_iter().map(|(language, conn)| {
         TextDatabase::init( 
             conn,
-            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 2])).unwrap(), 
-            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 3])).unwrap(), 
-            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 1])).unwrap(),
-            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 0])).unwrap(),
-            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 4])).unwrap()
+            parse_gamefile(&root_path.join(language).join(&requested_files[language]["chara_text"])).unwrap(), 
+            parse_gamefile(&root_path.join(language).join(&requested_files[language]["chara_text_roma"])).unwrap(), 
+            parse_gamefile(&root_path.join(language).join(&requested_files[language]["chara_description"])).unwrap(),
+            parse_gamefile(&root_path.join(language).join(&requested_files[language]["chara_add_info"])).unwrap(),
+            parse_gamefile(&root_path.join(language).join(&requested_files[language]["skill_text"])).unwrap()
         )
     }).collect();
 

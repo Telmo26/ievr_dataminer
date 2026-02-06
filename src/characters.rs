@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::LazyLock};
 
 use crossbeam::channel::Sender;
 use ievr_cfg_bin_editor_core::{Row, Table, Value};
@@ -13,14 +13,16 @@ pub use crate::{characters::character::{Element, Position, Stats, Style}, common
 
 pub const CHARA_ROOT_PATH: &str = "data/common/gamedata/character/";
 
-pub const CHARA_REQUIRED_FILES: [&str; 4] = [
-    "^chara_base_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
-    "^chara_param_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
-    "^chara_series_config.cfg.bin$",
-    "growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
-];
+pub static CHARA_REQUIRED_FILES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    map.insert("chara_base", "^chara_base_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$");
+    map.insert("chara_param", "^chara_param_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$");
+    map.insert("chara_series", "^chara_series_config.cfg.bin$");
+    map.insert("growth_table", "^growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$");
+    map
+});
 
-pub fn populate_character_data(extraction_path: &Path, mut character_database_connection: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<(i32, i32)>) {
+pub fn populate_character_data(extraction_path: &Path, mut character_database_connection: Connection, requested_files: HashMap<&'static str, String>, char_name_req_tx: Sender<(i32, i32)>) {
     // Database operations
     initialize_database(&character_database_connection).unwrap();
 
@@ -30,16 +32,16 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
     // We parse the game files
     let root_path= extraction_path.to_path_buf().join(CHARA_ROOT_PATH);
 
-    let chara_base = parse_gamefile(&root_path.join(&requested_files[0])).unwrap();
+    let chara_base = parse_gamefile(&root_path.join(&requested_files["chara_base"])).unwrap();
     let chara_base_info = chara_base.table("CHARA_BASE_INFO").unwrap();
 
-    let chara_param = parse_gamefile(&root_path.join(&requested_files[1])).unwrap();
+    let chara_param = parse_gamefile(&root_path.join(&requested_files["chara_param"])).unwrap();
     let chara_param_info = chara_param.table("CHARA_PARAM_INFO").unwrap();
 
-    let chara_series_config = parse_gamefile(&root_path.join(&requested_files[2])).unwrap();
+    let chara_series_config = parse_gamefile(&root_path.join(&requested_files["chara_series"])).unwrap();
     let chara_series_config_table = chara_series_config.table("m_charaSeriesInfoList").unwrap();
 
-    let growth_table = parse_gamefile(&root_path.join(&requested_files[3])).unwrap();
+    let growth_table = parse_gamefile(&root_path.join(&requested_files["growth_table"])).unwrap();
     let growth_table_main = growth_table.table("m_growthTableMainList").unwrap();
 
     // We create helper data structures to facilitate extraction

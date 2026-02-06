@@ -7,21 +7,21 @@ use crate::common::{parse_int_value, parse_string_value};
 
 pub struct TextDatabase {
     conn: Connection,
-    chara: HashMap<i32, String>,
-    chara_roma: HashMap<i32, String>,
+    chara_names: HashMap<i32, String>,
+    chara_roma_names: HashMap<i32, String>,
     chara_descriptions: HashMap<i32, String>,
-    // skill_file: HashMap<i32, (String, String)>,
+    // skill_text: HashMap<i32, (String, String)>,
 
     missing_character_names: u32,
 }
 
 impl TextDatabase {
     pub fn init(mut conn: Connection, 
-        chara_file: Database, 
-        chara_roma_file: Database, 
-        chara_desc_file: Database, 
-        chara_series_file: Database,
-        _skill_file: Database
+        chara_text: Database, 
+        chara_text_roma: Database, 
+        chara_description: Database, 
+        chara_add_info: Database,
+        _skill_text: Database
     ) -> TextDatabase {
         conn.pragma_update(None, "journal_mode", "WAL").unwrap();
         conn.pragma_update(None, "synchronous", "NORMAL").unwrap();
@@ -29,39 +29,39 @@ impl TextDatabase {
         Self::initialize_database(&conn);
 
         // Computing the character hash table
-        let chara_table = chara_file.table("NOUN_INFO").unwrap();
+        let chara_table = chara_text.table("NOUN_INFO").unwrap();
         let rows = chara_table.rows();
         
-        let mut chara = HashMap::with_capacity(rows.len());
+        let mut chara_names = HashMap::with_capacity(rows.len());
         for row in rows {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[5][0]);
 
             if parse_int_value(&row.values[1][0]) == 0 { // This value is different from 0 when texts are alternatives of the main one
-                if chara.insert(index, string).is_some() {
+                if chara_names.insert(index, string).is_some() {
                     println!("Text index {index} in double");
                 }
             }
         };
 
         // Computing the character roma hash table
-        let chara_roma_table = chara_roma_file.table("NOUN_INFO").unwrap();
+        let chara_roma_table = chara_text_roma.table("NOUN_INFO").unwrap();
         let rows = chara_roma_table.rows();
 
-        let mut chara_roma = HashMap::with_capacity(rows.len());
+        let mut chara_roma_names = HashMap::with_capacity(rows.len());
         for row in rows {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[5][0]);
 
             if parse_int_value(&row.values[1][0]) == 0 { // This value is different from 0 when texts are alternatives of the main one
-                if chara_roma.insert(index, string).is_some() {
+                if chara_roma_names.insert(index, string).is_some() {
                     println!("Text index {index} in double");
                 }
             }
         }
 
         // Computing the character description table
-        let chara_desc_table = chara_desc_file.table("TEXT_INFO").unwrap();
+        let chara_desc_table = chara_description.table("TEXT_INFO").unwrap();
         let rows = chara_desc_table.rows();
 
         let mut chara_descriptions = HashMap::with_capacity(rows.len());
@@ -75,10 +75,10 @@ impl TextDatabase {
         }
 
         // Inserting the series' names into the database
-        let series_table = chara_series_file.table("NOUN_INFO").unwrap();
+        let series_table = chara_add_info.table("NOUN_INFO").unwrap();
         Self::insert_series(&mut conn, series_table);
         
-        TextDatabase { conn, chara, chara_roma, chara_descriptions, missing_character_names: 0 }
+        TextDatabase { conn, chara_names, chara_roma_names, chara_descriptions, missing_character_names: 0 }
     }
 
     pub fn write_character(&mut self, index_batch: &Vec<(i32, i32)>) {
@@ -98,7 +98,7 @@ impl TextDatabase {
             ").unwrap();
             
             for (chara_index, chara_desc) in index_batch {
-                match self.chara.get(chara_index) {
+                match self.chara_names.get(chara_index) {
                     Some(name) => { name_stmt.execute(params![chara_index, name]).unwrap(); },
                     None => self.missing_character_names += 1,
                 } 
@@ -123,7 +123,7 @@ impl TextDatabase {
             ").unwrap();
             
             for (chara_index, _) in index_batch {
-                if let Some(name) = self.chara_roma.get(chara_index) {
+                if let Some(name) = self.chara_roma_names.get(chara_index) {
                     stmt.execute(params![chara_index, name]).unwrap();
                 }
             }
