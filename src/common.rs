@@ -18,6 +18,13 @@ pub fn parse_int_value(value: &Value) -> i32 {
     }
 }
 
+pub fn parse_uint_value(value: &Value) -> u32 {
+    match value {
+        Value::UInt(v) => *v,
+        _ => unreachable!()
+    }
+}
+
 pub fn parse_byte_value(value: &Value) -> u8 {
     match value {
         Value::Byte(v) => *v,

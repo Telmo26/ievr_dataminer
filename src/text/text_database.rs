@@ -9,21 +9,31 @@ pub struct TextDatabase {
     conn: Connection,
     chara: HashMap<i32, String>,
     chara_roma: HashMap<i32, String>,
+    chara_descriptions: HashMap<i32, String>,
     // skill_file: HashMap<i32, (String, String)>,
 
     missing_character_names: u32,
 }
 
 impl TextDatabase {
-    pub fn init(conn: Connection, chara_file: Database, chara_roma_file: Database, _skill_file: Database) -> TextDatabase {
+    pub fn init(mut conn: Connection, 
+        chara_file: Database, 
+        chara_roma_file: Database, 
+        chara_desc_file: Database, 
+        chara_series_file: Database,
+        _skill_file: Database
+    ) -> TextDatabase {
         conn.pragma_update(None, "journal_mode", "WAL").unwrap();
         conn.pragma_update(None, "synchronous", "NORMAL").unwrap();
 
+        Self::initialize_database(&conn);
+
         // Computing the character hash table
         let chara_table = chara_file.table("NOUN_INFO").unwrap();
+        let rows = chara_table.rows();
         
-        let mut chara = HashMap::new();
-        for row in chara_table.rows() {
+        let mut chara = HashMap::with_capacity(rows.len());
+        for row in rows {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[5][0]);
 
@@ -36,9 +46,10 @@ impl TextDatabase {
 
         // Computing the character roma hash table
         let chara_roma_table = chara_roma_file.table("NOUN_INFO").unwrap();
+        let rows = chara_roma_table.rows();
 
-        let mut chara_roma = HashMap::new();
-        for row in chara_roma_table.rows() {
+        let mut chara_roma = HashMap::with_capacity(rows.len());
+        for row in rows {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[5][0]);
 
@@ -48,31 +59,60 @@ impl TextDatabase {
                 }
             }
         }
+
+        // Computing the character description table
+        let chara_desc_table = chara_desc_file.table("TEXT_INFO").unwrap();
+        let rows = chara_desc_table.rows();
+
+        let mut chara_descriptions = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let index = parse_int_value(&row.values[0][0]);
+            let string = parse_string_value(&row.values[2][0]);
+
+            if chara_descriptions.insert(index, string).is_some() {
+                println!("Character description {index} in double");
+            }
+        }
+
+        // Inserting the series' names into the database
+        let series_table = chara_series_file.table("NOUN_INFO").unwrap();
+        Self::insert_series(&mut conn, series_table);
         
-        TextDatabase { conn, chara, chara_roma, missing_character_names: 0 }
+        TextDatabase { conn, chara, chara_roma, chara_descriptions, missing_character_names: 0 }
     }
 
-    pub fn write_character(&mut self, index_batch: &Vec<i32>) {
+    pub fn write_character(&mut self, index_batch: &Vec<(i32, i32)>) {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive).unwrap();
 
         {
-            let mut stmt = tx.prepare_cached("
+            let mut name_stmt = tx.prepare_cached("
                 INSERT INTO character_names (id, name) 
                 VALUES (?1, ?2) 
                 ON CONFLICT(id) DO NOTHING
             ").unwrap();
+
+            let mut desc_stmt = tx.prepare_cached("
+                INSERT INTO character_descriptions (id, description) 
+                VALUES (?1, ?2) 
+                ON CONFLICT(id) DO NOTHING
+            ").unwrap();
             
-            for index in index_batch {
-                if let Some(name) = self.chara.get(index) {
-                    stmt.execute(params![index, name]).unwrap();
-                } else { self.missing_character_names += 1; }
+            for (chara_index, chara_desc) in index_batch {
+                match self.chara.get(chara_index) {
+                    Some(name) => { name_stmt.execute(params![chara_index, name]).unwrap(); },
+                    None => self.missing_character_names += 1,
+                } 
+
+                if let Some(desc) = self.chara_descriptions.get(chara_desc) {
+                    desc_stmt.execute(params![chara_desc, desc]).unwrap();
+                } 
             }
         }
         
         tx.commit().unwrap();
     }
 
-    pub fn write_character_roma(&mut self, index_batch: &Vec<i32>) {
+    pub fn write_character_roma(&mut self, index_batch: &Vec<(i32, i32)>) {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive).unwrap();
 
         {
@@ -82,9 +122,9 @@ impl TextDatabase {
                 ON CONFLICT(id) DO NOTHING
             ").unwrap();
             
-            for index in index_batch {
-                if let Some(name) = self.chara_roma.get(index) {
-                    stmt.execute(params![index, name]).unwrap();
+            for (chara_index, _) in index_batch {
+                if let Some(name) = self.chara_roma.get(chara_index) {
+                    stmt.execute(params![chara_index, name]).unwrap();
                 }
             }
         }
@@ -101,6 +141,69 @@ impl TextDatabase {
     
     pub fn get_missing_names(&self) -> u32 {
         self.missing_character_names
+    }
+
+    fn initialize_database(conn: &Connection) {
+        conn.execute(
+                "CREATE TABLE character_names (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )", 
+            ()
+        ).unwrap();
+
+        conn.execute(
+                "CREATE TABLE character_names_roma (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )", 
+            ()
+        ).unwrap();
+
+        conn.execute(
+                "CREATE TABLE character_descriptions (
+                id INTEGER PRIMARY KEY,
+                description TEXT NOT NULL
+            )", 
+            ()
+        ).unwrap();
+
+        conn.execute(
+                "CREATE TABLE series_names (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )", 
+            ()
+        ).unwrap();
+
+        conn.execute(
+                "CREATE TABLE skill_names (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL
+            )", 
+            ()
+        ).unwrap();
+    }
+
+    fn insert_series(conn: &mut Connection, series_table: &ievr_cfg_bin_editor_core::Table) {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive).unwrap();
+
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO series_names (id, name)
+                VALUES (?1, ?2);"
+            ).unwrap();
+
+            for row in series_table.rows() {
+                let index = parse_int_value(&row.values[0][0]);
+                let name = parse_string_value(&row.values[5][0]);
+
+                stmt.execute(params![index, name]).unwrap();
+            }
+        }
+
+        tx.commit().unwrap();
     }
 }
 
