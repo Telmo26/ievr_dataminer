@@ -28,12 +28,12 @@ impl Settings {
 
         let output_folder = match &settings_table["datamining"]["output_folder"] {
             toml::Value::String(s) if !s.is_empty() => s.clone(),
-            value => return Err(SettingsError::OutputFolderError(value.clone()))
+            _ => return Err(SettingsError::OutputFolderError)
         };
 
         let extraction_folder = match &settings_table["datamining"]["extraction_folder"] {
             toml::Value::String(s) if !s.is_empty() => s.clone(),
-            value => return Err(SettingsError::ExtractionFolderError(value.clone()))
+            _ => return Err(SettingsError::ExtractionFolderError)
         };
 
         let game_folder = match &settings_table["extraction"]["game_folder"] {
@@ -99,8 +99,8 @@ impl Settings {
 pub enum SettingsError {
     IOError(std::io::Error),
     TomlParseError,
-    OutputFolderError(toml::Value),
-    ExtractionFolderError(toml::Value),
+    OutputFolderError,
+    ExtractionFolderError,
     DownloadError(u16),
 }
 
@@ -111,8 +111,8 @@ impl std::fmt::Display for SettingsError {
         match self {
             Self::IOError(e) => write!(f, "Filesystem error: {e}"),
             Self::TomlParseError => write!(f, "Invalid TOML format"),
-            Self::OutputFolderError(path) => write!(f, "Incorrect output folder: {path}"),
-            Self::ExtractionFolderError(path) => write!(f, "Incorrect extraction folder: {path}"),
+            Self::OutputFolderError => write!(f, "Incorrect output folder."),
+            Self::ExtractionFolderError => write!(f, "Incorrect extraction folder."),
             Self::DownloadError(code) => write!(f, "Download error, response code: {code}")
         }
     }
