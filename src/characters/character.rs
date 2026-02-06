@@ -2,6 +2,7 @@
 pub struct Character {
     pub index: i32,
     pub name_id: i32,
+    pub description_id: i32,
     pub element: Element,
     pub main_position: Position,
     pub alt_position: Position,

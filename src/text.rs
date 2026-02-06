@@ -2,7 +2,7 @@ use std::{path::Path};
 
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
-use rusqlite::{Connection, Result};
+use rusqlite::Connection;
 
 mod text_database;
 
@@ -18,14 +18,16 @@ pub const TEXT_LANGUAGES: [&str; 9] = [
 
 pub const TEXT_ROOT_PATH: &str = "data/common/text";
 
-pub const TEXT_REQUIRED_FILES: [&str; 3] = [
-    "^chara_text.cfg.bin$", "^chara_text_roma.cfg.bin$", "^skill_text.cfg.bin$"
+pub const TEXT_REQUIRED_FILES: [&str; 5] = [
+    "^chara_add_info_text.cfg.bin$",
+    "^chara_description_text.cfg.bin$",
+    "^chara_text.cfg.bin$", 
+    "^chara_text_roma.cfg.bin$", 
+    "^skill_text.cfg.bin$"
 ];
 
-pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec<Connection>, requested_files: Vec<String>, char_name_req_rx: Receiver<i32>) {
-    initialize_databases(&text_database_connections).unwrap();
-
-    assert!(text_database_connections.len() == 9);
+pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec<Connection>, requested_files: Vec<String>, char_name_req_rx: Receiver<(i32, i32)>) {
+    assert!(text_database_connections.len() == TEXT_LANGUAGES.len());
 
     #[cfg(debug_assertions)]
     println!("{:#?}", requested_files);
@@ -35,16 +37,18 @@ pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec
     let mut databases: Vec<TextDatabase> = text_database_connections.into_par_iter().enumerate().map(|(i, conn)| {
         TextDatabase::init( 
             conn,
-            parse_gamefile(&root_path.join(&requested_files[3*i + 0])).unwrap(), 
-            parse_gamefile(&root_path.join(&requested_files[3*i + 1])).unwrap(), 
-            parse_gamefile(&root_path.join(&requested_files[3*i + 2])).unwrap()
+            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 2])).unwrap(), 
+            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 3])).unwrap(), 
+            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 1])).unwrap(),
+            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 0])).unwrap(),
+            parse_gamefile(&root_path.join(&requested_files[TEXT_REQUIRED_FILES.len() * i + 4])).unwrap()
         )
     }).collect();
 
     let mut char_requests = Vec::with_capacity(1000);
 
-    while let Ok(request) = char_name_req_rx.recv() {
-        char_requests.push(request);
+    while let Ok(char_request) = char_name_req_rx.recv() {
+        char_requests.push(char_request);
 
         if char_requests.len() >= 1000 {
             databases.par_iter_mut().for_each(|d| {
@@ -65,35 +69,4 @@ pub fn populate_text_data(extraction_path: &Path, text_database_connections: Vec
     }
 
     println!("[TEXT]: {} requested name(s) not found.", databases[0].get_missing_names());
-}
-
-fn initialize_databases(text_databases: &Vec<Connection>) -> Result<()> {
-    for database in text_databases {
-        database.execute(
-                "CREATE TABLE character_names (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL
-            )", 
-            ()
-        ).unwrap();
-
-        database.execute(
-                "CREATE TABLE character_names_roma (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL
-            )", 
-            ()
-        ).unwrap();
-
-        database.execute(
-                "CREATE TABLE skill_names (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL
-            )", 
-            ()
-        ).unwrap();
-    };
-
-    Ok(())
 }

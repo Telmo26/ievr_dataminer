@@ -111,7 +111,7 @@ fn main() {
     println!("\nGame data mining done. Please open the \"{}\" folder to get the databases.", &settings.output_folder);
 }
 
-fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_tx: Sender<i32>) -> JoinHandle<()> {
+fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_tx: Sender<(i32, i32)>) -> JoinHandle<()> {
     let character_database = Connection::open(output_folder_path.join(DATABASES[0])).unwrap();
 
     let mut chara_requested_files: Vec<String> = check_chara_files_existence(&extraction_root_path).unwrap()
@@ -126,7 +126,7 @@ fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc
     })
 }
 
-fn create_text_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_rx: Receiver<i32>) -> JoinHandle<()> {
+fn create_text_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_rx: Receiver<(i32, i32)>) -> JoinHandle<()> {
     let text_databases: Vec<Connection> = DATABASES[2..].iter()
         .map(|p| { 
             Connection::open(output_folder_path.join(p)).unwrap()

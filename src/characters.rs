@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{collections::HashMap, path::Path};
 
 use crossbeam::channel::Sender;
 use ievr_cfg_bin_editor_core::{Row, Table, Value};
@@ -8,42 +8,51 @@ mod character;
 pub use character::Character;
 use rusqlite::{Connection, Result, params};
 
-use crate::common::{parse_byte_value, parse_int_value};
+use crate::common::{parse_byte_value, parse_int_value, parse_uint_value};
 pub use crate::{characters::character::{Element, Position, Stats, Style}, common::parse_gamefile};
 
 pub const CHARA_ROOT_PATH: &str = "data/common/gamedata/character/";
 
-pub const CHARA_REQUIRED_FILES: [&str; 3] = [
+pub const CHARA_REQUIRED_FILES: [&str; 4] = [
     "^chara_base_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
     "^chara_param_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
-    "growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$"
+    "^chara_series_config.cfg.bin$",
+    "growth_table_config_\\d+\\.\\d+\\.\\d+\\.\\d+\\.cfg\\.bin$",
 ];
 
-pub fn populate_character_data(extraction_path: &Path, mut character_database_connection: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<i32>) {
+pub fn populate_character_data(extraction_path: &Path, mut character_database_connection: Connection, requested_files: Vec<String>, char_name_req_tx: Sender<(i32, i32)>) {
     // Database operations
     initialize_database(&character_database_connection).unwrap();
 
     character_database_connection.pragma_update(None, "journal_mode", "WAL").unwrap();
     character_database_connection.pragma_update(None, "synchronous", "NORMAL").unwrap();
 
+    // We parse the game files
     let root_path= extraction_path.to_path_buf().join(CHARA_ROOT_PATH);
 
-    let chara_base = parse_gamefile(&PathBuf::from(root_path.join(&requested_files[0]))).unwrap();
+    let chara_base = parse_gamefile(&root_path.join(&requested_files[0])).unwrap();
     let chara_base_info = chara_base.table("CHARA_BASE_INFO").unwrap();
 
-    let chara_param = parse_gamefile(&PathBuf::from(root_path.join(&requested_files[1]))).unwrap();
+    let chara_param = parse_gamefile(&root_path.join(&requested_files[1])).unwrap();
     let chara_param_info = chara_param.table("CHARA_PARAM_INFO").unwrap();
 
-    let growth_table = parse_gamefile(&PathBuf::from(root_path.join(&requested_files[2]))).unwrap();
+    let chara_series_config = parse_gamefile(&root_path.join(&requested_files[2])).unwrap();
+    let chara_series_config_table = chara_series_config.table("m_charaSeriesInfoList").unwrap();
+
+    let growth_table = parse_gamefile(&root_path.join(&requested_files[3])).unwrap();
     let growth_table_main = growth_table.table("m_growthTableMainList").unwrap();
 
+    // We create helper data structures to facilitate extraction
     let growth_hash_table = parse_growth_table(growth_table_main);    
+
+    let series_text_hash_table = parse_series_info(chara_series_config_table);
 
     let chara_base_info = get_characters(&chara_base_info);
 
     #[cfg(debug_assertions)]
     println!("Nb of characters: {}", chara_base_info.len());
 
+    // We create the buffers to batch insertions
     let mut char_buffer = Vec::with_capacity(1000);
     let mut hero_buffer = Vec::with_capacity(100);
     let mut basara_buffer = Vec::with_capacity(100);
@@ -54,19 +63,23 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
         let index = parse_int_value(&row.values[2][0]);
 
         let name_id = parse_int_value(&row.values[3][0]);
+        let description_id = parse_int_value(&row.values[19][0]);
 
-        let series_id = parse_int_value(&row.values[15][0]);
+        let series_id = match series_text_hash_table.get(&parse_int_value(&row.values[15][0])) {
+            Some(v) => *v,
+            None => continue, // If the character doesn't have a valid series ID it is not worth investigating
+        };
 
         let chara_base_id = parse_int_value(&row.values[0][0]);
         let mut found_char = false;
 
         for row in chara_param_info.rows() {
             if parse_int_value(&row.values[1][0]) == chara_base_id {                
-                if let Some(character) = extract_character(index, name_id, series_id, row, &growth_hash_table) {
+                if let Some(character) = extract_character(index, name_id, description_id, series_id, row, &growth_hash_table) {
                     let rarity = parse_int_value(&row.values[41][0]);
 
                     if !found_char {
-                        char_name_req_tx.send(name_id).unwrap();
+                        char_name_req_tx.send((name_id, description_id)).unwrap();
                         found_char = true;
                     }
                 
@@ -148,7 +161,26 @@ fn parse_growth_table(growth_table_main: &Table) -> HashMap<(u8, u8, u8), (Stats
     growth_hash_table
 }
 
-fn extract_character(index: i32, name_id: i32, series_id: i32, row: &Row, growth_hash_table: &HashMap<(u8, u8, u8), (Stats, Stats)>) -> Option<Character> {
+/// This functions creates a hash map to map the series ID stored in
+/// chara_base to the actual series text ID that is stored in the
+/// corresponding text file.
+fn parse_series_info(chara_series_config_table: &Table) -> HashMap<i32, i32> {
+    let mut series_hash_map = HashMap::with_capacity(9);
+
+    for row in chara_series_config_table.rows() {
+        // The game stores this value as unsigned but chara_base stores it as signed...
+        let series_id = parse_uint_value(&row.values[0][0]).cast_signed();
+
+        // Same for the text file
+        let series_text_id = parse_uint_value(&row.values[2][0]).cast_signed();  
+        
+        series_hash_map.insert(series_id, series_text_id);
+    }
+
+    series_hash_map
+}
+
+fn extract_character(index: i32, name_id: i32, description_id: i32, series_id: i32, row: &Row, growth_hash_table: &HashMap<(u8, u8, u8), (Stats, Stats)>) -> Option<Character> {
     let rarity = parse_int_value(&row.values[41][0]);
 
     let skill_slice: Vec<i32> = row.values[23..=28].iter()// We filter by making sure the character has a second technique path
@@ -182,6 +214,7 @@ fn extract_character(index: i32, name_id: i32, series_id: i32, row: &Row, growth
     Some(Character {
         index,
         name_id,
+        description_id,
         element,
         main_position,
         alt_position,
@@ -197,6 +230,7 @@ fn initialize_database(database: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS characters (
             index_id        INTEGER PRIMARY KEY,
             name_id         INTEGER NOT NULL,
+            description_id  INTEGER NOT NULL,
             element         INTEGER NOT NULL,
             main_position   INTEGER NOT NULL,
             alt_position    INTEGER NOT NULL,
@@ -226,6 +260,7 @@ fn initialize_database(database: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS heroes (
             index_id        INTEGER NOT NULL,
             name_id         INTEGER NOT NULL,
+            description_id  INTEGER NOT NULL,
             element         INTEGER NOT NULL,
             main_position   INTEGER NOT NULL,
             alt_position    INTEGER NOT NULL,
@@ -255,6 +290,7 @@ fn initialize_database(database: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS basaras (
             index_id        INTEGER NOT NULL,
             name_id         INTEGER NOT NULL,
+            description_id  INTEGER NOT NULL,
             element         INTEGER NOT NULL,
             main_position   INTEGER NOT NULL,
             alt_position    INTEGER NOT NULL,
@@ -289,14 +325,14 @@ fn insert_characters(conn: &mut Connection, characters: &Vec<Character>) -> rusq
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO characters (
-                index_id, name_id, element, main_position, alt_position, style, series_id,
+                index_id, name_id, description_id, element, main_position, alt_position, style, series_id,
                 lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
                 lvl50_physical, lvl50_agility, lvl50_intelligence,
                 lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
                 lvl99_physical, lvl99_agility, lvl99_intelligence
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                        ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                        ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 
+                        ?9, ?10, ?11, ?12, ?13, ?14, ?15, 
+                        ?16, ?17, ?18, ?19, ?20, ?21, ?22)
             ON CONFLICT(index_id) DO NOTHING"
         )?;
 
@@ -305,6 +341,7 @@ fn insert_characters(conn: &mut Connection, characters: &Vec<Character>) -> rusq
                 params![
                     c.index,
                     c.name_id,
+                    c.description_id,
                     c.element as i32,
                     c.main_position as i32,
                     c.alt_position as i32,
@@ -340,14 +377,14 @@ fn insert_heroes(conn: &mut Connection, characters: &Vec<Character>) -> rusqlite
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO heroes (
-                index_id, name_id, element, main_position, alt_position, style, series_id,
+                index_id, name_id, description_id, element, main_position, alt_position, style, series_id,
                 lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
                 lvl50_physical, lvl50_agility, lvl50_intelligence,
                 lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
                 lvl99_physical, lvl99_agility, lvl99_intelligence
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                        ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                        ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 
+                        ?9, ?10, ?11, ?12, ?13, ?14, ?15, 
+                        ?16, ?17, ?18, ?19, ?20, ?21, ?22)"
         )?;
 
         for c in characters {
@@ -355,6 +392,7 @@ fn insert_heroes(conn: &mut Connection, characters: &Vec<Character>) -> rusqlite
                 params![
                     c.index,
                     c.name_id,
+                    c.description_id,
                     c.element as i32,
                     c.main_position as i32,
                     c.alt_position as i32,
@@ -390,14 +428,14 @@ fn insert_basaras(conn: &mut Connection, characters: &Vec<Character>) -> rusqlit
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO basaras (
-                index_id, name_id, element, main_position, alt_position, style, series_id,
+                index_id, name_id, description_id, element, main_position, alt_position, style, series_id,
                 lvl50_kick, lvl50_control, lvl50_technique, lvl50_pressure,
                 lvl50_physical, lvl50_agility, lvl50_intelligence,
                 lvl99_kick, lvl99_control, lvl99_technique, lvl99_pressure,
                 lvl99_physical, lvl99_agility, lvl99_intelligence
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                        ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                        ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 
+                        ?9, ?10, ?11, ?12, ?13, ?14, ?15, 
+                        ?16, ?17, ?18, ?19, ?20, ?21, ?22)"
         )?;
 
         for c in characters {
@@ -405,6 +443,7 @@ fn insert_basaras(conn: &mut Connection, characters: &Vec<Character>) -> rusqlit
                 params![
                     c.index,
                     c.name_id,
+                    c.description_id,
                     c.element as i32,
                     c.main_position as i32,
                     c.alt_position as i32,
