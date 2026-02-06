@@ -124,16 +124,16 @@ fn parse_growth_table(growth_table_main: &Table) -> HashMap<(u8, u8, u8), (Stats
         let chara_rank = parse_byte_value(&row.values[2][0]);
 
         growth_hash_table.insert((main_position, growth_pattern, chara_rank), 
-            (Stats {
-                kick:           parse_int_value(&row.values[3][0]) as u16,
-                control:        parse_int_value(&row.values[4][0]) as u16,
-                technique:      parse_int_value(&row.values[5][0]) as u16,
-                pressure:       parse_int_value(&row.values[6][0]) as u16,
-                physical:       parse_int_value(&row.values[7][0]) as u16,
-                agility:        parse_int_value(&row.values[8][0]) as u16,
-                intelligence:   parse_int_value(&row.values[9][0]) as u16,
+            (Stats { // The level 50 stats for legendary, heroes and basara characters are multiplied by 1.4 from the game's base stats
+                kick:           parse_int_value(&row.values[3][0]) as u16 * 14 / 10,
+                control:        parse_int_value(&row.values[4][0]) as u16 * 14 / 10,
+                technique:      parse_int_value(&row.values[5][0]) as u16 * 14 / 10,
+                pressure:       parse_int_value(&row.values[6][0]) as u16 * 14 / 10,
+                physical:       parse_int_value(&row.values[7][0]) as u16 * 14 / 10,
+                agility:        parse_int_value(&row.values[8][0]) as u16 * 14 / 10,
+                intelligence:   parse_int_value(&row.values[9][0]) as u16 * 14 / 10,
             }, 
-            Stats {
+            Stats { // These are the base stats, the exact computation for level 99 is unknown
                 kick:           parse_int_value(&row.values[10][0]) as u16,
                 control:        parse_int_value(&row.values[11][0]) as u16,
                 technique:      parse_int_value(&row.values[12][0]) as u16,

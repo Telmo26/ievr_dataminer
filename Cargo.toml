@@ -4,19 +4,19 @@ version = "1.0.0"
 edition = "2024"
 
 [profile.dist]
-inherits = "release"  # Start with standard release settings
-lto = true            # Maximum cross-crate code stripping
-codegen-units = 1     # Better optimization at the cost of compile time
-panic = "abort"       # Removes "unwinding" code (big size win)
-strip = true          # Removes debug symbols automatically
-opt-level = "s"       # "z" focuses on binary size, "s" focuses on speed/size balance
+inherits = "release"  
+lto = true            
+codegen-units = 1     
+panic = "abort"       
+strip = true          
+opt-level = "s"       
 
 [dependencies]
 crossbeam = "0.8.4"
 memmap2 = "0.9"
 rayon = "1.11.0"
-regex = "1.12.2"
+regex = { version = "1.12.2", default-features = false, features = ["std", "perf", "unicode-perl"] }
 rusqlite = {version = "0.38.0", features = ["bundled"]}
 ievr_cfg_bin_editor_core = { git = "https://github.com/Telmo26/ievr_cfg_bin_editor.git", branch = "main" }
 toml = "0.9"
-reqwest = { version = "0.13", features = ["blocking"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "http2", "native-tls"] }
