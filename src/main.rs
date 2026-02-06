@@ -8,7 +8,7 @@ mod file_operations;
 mod settings;
 mod tools;
 
-use std::{fs, io::Write, path::{Path, PathBuf}, process::exit, sync::Arc, thread::{self, JoinHandle}};
+use std::{collections::HashMap, fs, io::Write, path::{Path, PathBuf}, process::exit, sync::Arc, thread::{self, JoinHandle}};
 
 use file_operations::{
     create_required_files,
@@ -25,7 +25,6 @@ use characters::{
 use text::{
     populate_text_data,
     TEXT_ROOT_PATH,
-    TEXT_LANGUAGES,
     TEXT_REQUIRED_FILES,
 };
 
@@ -33,19 +32,12 @@ use settings::Settings;
 
 use tools::Tools;
 
-const DATABASES: [&str; 11] = [
+const DATABASES: [&str; 2] = [
     "characters.sqlite",
     "skills.sqlite",
-    "text/de.sqlite",
-    "text/en.sqlite",
-    "text/es.sqlite",
-    "text/fr.sqlite",
-    "text/it.sqlite",
-    "text/ja.sqlite",
-    "text/pt.sqlite",
-    "text/zh_hans.sqlite",
-    "text/zh_hant.sqlite",
 ];
+
+const TEXT_DATABASES_ROOT: &str = "text";
 
 fn main() {
     // If the settings file does not exist, we download it
@@ -114,11 +106,7 @@ fn main() {
 fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_tx: Sender<(i32, i32)>) -> JoinHandle<()> {
     let character_database = Connection::open(output_folder_path.join(DATABASES[0])).unwrap();
 
-    let mut chara_requested_files: Vec<String> = check_chara_files_existence(&extraction_root_path).unwrap()
-        .into_iter()
-        .map(|(_, filename)| filename)
-        .collect();
-    chara_requested_files.sort(); // This will sort the files in alphabetical order, which is expected
+    let chara_requested_files = check_chara_files_existence(&extraction_root_path).unwrap();
 
     let extraction_path_clone = extraction_root_path.clone();
     thread::spawn(move || {
@@ -127,17 +115,15 @@ fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc
 }
 
 fn create_text_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_rx: Receiver<(i32, i32)>) -> JoinHandle<()> {
-    let text_databases: Vec<Connection> = DATABASES[2..].iter()
-        .map(|p| { 
-            Connection::open(output_folder_path.join(p)).unwrap()
-        })
-        .collect();
+    let text_requested_files = check_text_files_existence(&extraction_root_path).unwrap();
 
-    let mut text_requested_files: Vec<String> = check_text_files_existence(&extraction_root_path).unwrap()
-        .into_iter()
-        .map(|(_, filename)| filename)
-        .collect();
-    text_requested_files.sort();
+    let mut text_databases = HashMap::with_capacity(text_requested_files.len());
+    for language in text_requested_files.keys() {
+        text_databases.insert(
+            *language, 
+            Connection::open(output_folder_path.join(TEXT_DATABASES_ROOT).join(format!("{language}.sqlite"))).unwrap()
+        );
+    }
 
     let extraction_path_clone = extraction_root_path.clone();
     thread::spawn(move || {
@@ -151,9 +137,9 @@ fn get_missing_character_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'sta
             let mut missing_rules = Vec::new();
 
             if files.len() < CHARA_REQUIRED_FILES.len() { // We compute the rules not fullfilled
-                for rule in CHARA_REQUIRED_FILES {
-                    if !files.iter().any(|(r, _)| *r == rule) {
-                        missing_rules.push(rule);
+                for (identifier, rule) in CHARA_REQUIRED_FILES.iter() {
+                    if !files.contains_key(identifier) {
+                        missing_rules.push(*rule);
                     }
                 }
             }
@@ -172,18 +158,18 @@ fn get_missing_text_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'static s
         Some(files) => {
             let mut missing_rules = Vec::new();
 
-            if files.len() < TEXT_LANGUAGES.len() * TEXT_REQUIRED_FILES.len() { // We compute the rules not fullfilled
-                for rule in TEXT_REQUIRED_FILES {
+            for (language, rules) in TEXT_REQUIRED_FILES.iter() {
+                if !files.contains_key(language) { // If there's a whole language missing
+                    for &value in rules.values() { missing_rules.push(value); }
+                    break;
+                }
 
-                    let mut missing = false;
-                    for language in TEXT_LANGUAGES {
-                        if !files.iter().any(|(r, s)| *r == rule && s.starts_with(language)) {
-                            missing = true;
-                            break;
+                if files[language].len() < rules.len() {
+                    for (&identifier, &rule) in rules.iter() {
+                        if !files[language].contains_key(identifier) {
+                            missing_rules.push(rule);
                         }
-                    };
-                    
-                    if missing { missing_rules.push(rule) }
+                    }
                 }
             }
             
