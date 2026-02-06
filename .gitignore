@@ -1,5 +1,6 @@
 /target
 *.cfg.bin
+settings.toml
 /extracted
 /output
 /tools
