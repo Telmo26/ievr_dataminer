@@ -30,10 +30,14 @@ impl TextDatabase {
 
         // Computing the character hash table
         let chara_table = chara_text.table("NOUN_INFO").unwrap();
-        let rows = chara_table.rows();
+        let mut rows_iter = chara_table.rows().into_iter();
+
+        rows_iter.next(); // We remove the BEGIN row
+        rows_iter.next_back(); // We remove the END row
         
-        let mut chara_names = HashMap::with_capacity(rows.len());
-        for row in rows {
+        let mut chara_names = HashMap::with_capacity(rows_iter.len());
+
+        for row in rows_iter {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[5][0]);
 
@@ -46,10 +50,13 @@ impl TextDatabase {
 
         // Computing the character roma hash table
         let chara_roma_table = chara_text_roma.table("NOUN_INFO").unwrap();
-        let rows = chara_roma_table.rows();
+        let mut rows_iter = chara_roma_table.rows().into_iter();
 
-        let mut chara_roma_names = HashMap::with_capacity(rows.len());
-        for row in rows {
+        rows_iter.next(); // We remove the BEGIN row
+        rows_iter.next_back(); // We remove the END row
+
+        let mut chara_roma_names = HashMap::with_capacity(rows_iter.len());
+        for row in rows_iter {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[5][0]);
 
@@ -62,10 +69,13 @@ impl TextDatabase {
 
         // Computing the character description table
         let chara_desc_table = chara_description.table("TEXT_INFO").unwrap();
-        let rows = chara_desc_table.rows();
+        let mut rows_iter = chara_desc_table.rows().into_iter();
 
-        let mut chara_descriptions = HashMap::with_capacity(rows.len());
-        for row in rows {
+        rows_iter.next(); // We remove the BEGIN row
+        rows_iter.next_back(); // We remove the END row
+
+        let mut chara_descriptions = HashMap::with_capacity(rows_iter.len());
+        for row in rows_iter {
             let index = parse_int_value(&row.values[0][0]);
             let string = parse_string_value(&row.values[2][0]);
 
@@ -195,7 +205,12 @@ impl TextDatabase {
                 VALUES (?1, ?2);"
             ).unwrap();
 
-            for row in series_table.rows() {
+            let mut series_iter = series_table.rows().into_iter();
+
+            series_iter.next(); // We skip the BEGIN row
+            series_iter.next_back(); // We skip the END row
+
+            for row in series_iter {
                 let index = parse_int_value(&row.values[0][0]);
                 let name = parse_string_value(&row.values[5][0]);
 
