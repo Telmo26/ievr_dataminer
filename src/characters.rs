@@ -8,8 +8,8 @@ mod character;
 pub use character::Character;
 use rusqlite::{Connection, Result, params};
 
-use crate::common::{parse_byte_value, parse_int_value, parse_uint_value};
-pub use crate::{characters::character::{Element, Position, Stats, Style}, common::parse_gamefile};
+use crate::common::{Element, parse_byte_value, parse_int_value, parse_uint_value};
+pub use crate::{characters::character::{Position, Stats, Style}, common::parse_gamefile};
 
 pub const CHARA_ROOT_PATH: &str = "data/common/gamedata/character/";
 
