@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::{self, File}, path::Path};
 
 use crate::{
-    CHARA_REQUIRED_FILES, CHARA_ROOT_PATH, DATABASES, TEXT_DATABASES_ROOT, TEXT_REQUIRED_FILES, TEXT_ROOT_PATH, text::TEXT_LANGUAGES
+    CHARA_REQUIRED_FILES, CHARA_ROOT_PATH, DATABASES, TEXT_DATABASES_ROOT, TEXT_REQUIRED_FILES, TEXT_ROOT_PATH, SKILL_REQUIRED_FILES, SKILL_ROOT_PATH, text::TEXT_LANGUAGES
 };
 
 pub fn create_required_files(output_folder: &Path) {
@@ -101,6 +101,33 @@ pub fn check_text_files_existence(extraction_root_path: &Path) -> Option<HashMap
                 }
             }
         } 
+    }
+
+    Some(files)
+}
+
+pub fn check_skill_files_existence(extraction_root_path: &Path) -> Option<HashMap<&'static str, String>> {
+    let skill_root = extraction_root_path.to_path_buf().join(SKILL_ROOT_PATH);
+
+    match fs::exists(&skill_root) {
+        Ok(bool) => if !bool { return Some(HashMap::new()) },
+        Err(_) => return None,
+    }
+
+    let mut files: HashMap<&str, String> = HashMap::new();
+
+    for (identifier, rule) in SKILL_REQUIRED_FILES.iter() {
+        let regex = regex::Regex::new(rule).unwrap();
+
+        for file in fs::read_dir(&skill_root).ok()? {
+            let file = file.ok()?;
+            let file_name = file.file_name();
+            let file_name_str = file_name.to_string_lossy();
+            
+            if regex.is_match(&file_name_str) {
+                files.insert(identifier, file_name_str.to_string());
+            }
+        }
     }
 
     Some(files)

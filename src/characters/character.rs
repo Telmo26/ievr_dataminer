@@ -1,3 +1,5 @@
+use crate::common::Element;
+
 #[derive(Debug)]
 pub struct Character {
     pub index: i32,
@@ -11,27 +13,6 @@ pub struct Character {
     pub lvl99_stats: Stats,
     pub series_id: i32,
     
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Element {
-    WIND = 1,
-    FOREST = 2,
-    FIRE = 3,
-    MOUNTAIN = 4,
-    UNKNOWN = 5,
-}
-
-impl From<i32> for Element {
-    fn from(value: i32) -> Self {
-        match value {
-            1 => Element::WIND,
-            2 => Element::FOREST,
-            3 => Element::FIRE,
-            4 => Element::MOUNTAIN,
-            _ => Element::UNKNOWN,
-        }
-    }
 }
 
 #[repr(u8)]

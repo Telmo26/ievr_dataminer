@@ -8,8 +8,8 @@ mod character;
 pub use character::Character;
 use rusqlite::{Connection, Result, params};
 
-use crate::common::{parse_byte_value, parse_int_value, parse_uint_value};
-pub use crate::{characters::character::{Element, Position, Stats, Style}, common::parse_gamefile};
+use crate::common::{Element, parse_byte_value, parse_int_value, parse_uint_value};
+pub use crate::{characters::character::{Position, Stats, Style}, common::parse_gamefile};
 
 pub const CHARA_ROOT_PATH: &str = "data/common/gamedata/character/";
 
@@ -33,10 +33,12 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
     let root_path= extraction_path.to_path_buf().join(CHARA_ROOT_PATH);
 
     let chara_base = parse_gamefile(&root_path.join(&requested_files["chara_base"])).unwrap();
-    let chara_base_info = chara_base.table("CHARA_BASE_INFO").unwrap();
+    let chara_base_info = chara_base.table("CHARA_BASE_INFO_LIST").unwrap();
 
     let chara_param = parse_gamefile(&root_path.join(&requested_files["chara_param"])).unwrap();
-    let chara_param_info = chara_param.table("CHARA_PARAM_INFO").unwrap();
+    let chara_param_info = chara_param.table("CHARA_PARAM_INFO_LIST").unwrap();
+
+    let chara_param_rows = &chara_param_info.rows()[1..chara_param_info.rows().len() - 1]; // We skip the BEGIN and END rows
 
     let chara_series_config = parse_gamefile(&root_path.join(&requested_files["chara_series"])).unwrap();
     let chara_series_config_table = chara_series_config.table("m_charaSeriesInfoList").unwrap();
@@ -75,7 +77,9 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
         let chara_base_id = parse_int_value(&row.values[0][0]);
         let mut found_char = false;
 
-        for row in chara_param_info.rows() {
+        for row in chara_param_rows {
+            if row.values.len() == 1 { continue } // This skips the __SORT_INDEX entries
+            
             if parse_int_value(&row.values[1][0]) == chara_base_id {                
                 if let Some(character) = extract_character(index, name_id, description_id, series_id, row, &growth_hash_table) {
                     let rarity = parse_int_value(&row.values[41][0]);
@@ -114,10 +118,13 @@ pub fn populate_character_data(extraction_path: &Path, mut character_database_co
 
 fn get_characters(chara_base_info: &Table) -> Vec<&Row> {
     let mut filtered_table: Vec<&Row> = chara_base_info.rows().iter()
-        .filter(|row| match row.values[2][0] {
+        .filter(|row| if row.values.len() < 3 {
+            false
+        } else {            
+            match row.values[2][0] {
             Value::Int(v) => v > 0, // We only want the characters who have a valid index
             _ => unreachable!()
-        })
+        }})
         .collect();
 
     filtered_table.sort_by_key(|row| {

@@ -2,40 +2,39 @@ use crossbeam::channel::{self, Receiver, Sender};
 use rusqlite::Connection;
 
 mod characters;
-mod text;
 mod common;
 mod file_operations;
 mod settings;
+mod skills;
+mod text;
 mod tools;
 
-use std::{collections::HashMap, fs, io::Write, path::{Path, PathBuf}, process::exit, sync::Arc, thread::{self, JoinHandle}};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::exit,
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
 
 use file_operations::{
+    check_chara_files_existence, check_skill_files_existence, check_text_files_existence,
     create_required_files,
-    check_chara_files_existence,
-    check_text_files_existence,
 };
 
-use characters::{
-    populate_character_data,
-    CHARA_ROOT_PATH,
-    CHARA_REQUIRED_FILES,
-};
+use characters::{CHARA_REQUIRED_FILES, CHARA_ROOT_PATH, populate_character_data};
 
-use text::{
-    populate_text_data,
-    TEXT_ROOT_PATH,
-    TEXT_REQUIRED_FILES,
-};
+use text::{TEXT_REQUIRED_FILES, TEXT_ROOT_PATH, populate_text_data};
+
+use skills::{SKILL_REQUIRED_FILES, SKILL_ROOT_PATH, populate_skill_data};
 
 use settings::Settings;
 
 use tools::Tools;
 
-const DATABASES: [&str; 2] = [
-    "characters.sqlite",
-    "skills.sqlite",
-];
+const DATABASES: [&str; 2] = ["characters.sqlite", "skills.sqlite"];
 
 const TEXT_DATABASES_ROOT: &str = "text";
 
@@ -44,7 +43,9 @@ fn main() {
     if !fs::exists("settings.toml").unwrap() {
         println!("Settings file not found, downloading from GitHub...");
         match Settings::download() {
-            Ok(_) => println!("Download completed, please update the contents of the settings file and restart the program."),
+            Ok(_) => println!(
+                "Download completed, please update the contents of the settings file and restart the program."
+            ),
             Err(e) => eprintln!("Download failed because of \n{e}\nAborting"),
         }
 
@@ -55,7 +56,10 @@ fn main() {
     // We parse the settings
     let settings = match Settings::parse("settings.toml") {
         Ok(s) => s,
-        Err(e) => { eprintln!("Aborting because of {e}") ; exit(1) }
+        Err(e) => {
+            eprintln!("Aborting because of {e}");
+            exit(1)
+        }
     };
 
     // We compute the paths
@@ -67,10 +71,12 @@ fn main() {
 
     // We setup the required channels for communication between the threads
     let (char_name_req_tx, char_name_req_rx) = channel::unbounded();
+    let (skill_name_req_tx, skill_name_req_rx) = channel::unbounded();
 
     // We verify the presence of all required files
-    let mut rules_to_extract = get_missing_character_rules(&extraction_root_path);    
+    let mut rules_to_extract = get_missing_character_rules(&extraction_root_path);
     rules_to_extract.extend(get_missing_text_rules(&extraction_root_path));
+    rules_to_extract.extend(get_missing_skill_rules(&extraction_root_path));
 
     #[cfg(debug_assertions)]
     println!("Rules not fullfilled: {:#?}", rules_to_extract);
@@ -94,40 +100,101 @@ fn main() {
 
     // We start the different threads
     let character_thread = create_character_thread(&output_folder_path, &extraction_root_path, char_name_req_tx);
-    let text_thread = create_text_thread(&output_folder_path, &extraction_root_path, char_name_req_rx);
+    
+    let text_thread = create_text_thread(
+        &output_folder_path,
+        &extraction_root_path,
+        char_name_req_rx,
+        skill_name_req_rx,
+    );
+
+    let skill_thread = create_skill_thread(
+        &output_folder_path,
+        &extraction_root_path,
+        skill_name_req_tx,
+    );
 
     // We wait for the program to finish
     let _ = character_thread.join();
     let _ = text_thread.join();
+    let _ = skill_thread.join();
 
-    println!("\nGame data mining done. Please open the \"{}\" folder to get the databases.", &settings.output_folder);
+    println!(
+        "\nGame data mining done. Please open the \"{}\" folder to get the databases.",
+        &settings.output_folder
+    );
 }
 
-fn create_character_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_tx: Sender<(i32, i32)>) -> JoinHandle<()> {
+fn create_character_thread(
+    output_folder_path: &Path,
+    extraction_root_path: &Arc<PathBuf>,
+    char_name_req_tx: Sender<(i32, i32)>,
+) -> JoinHandle<()> {
     let character_database = Connection::open(output_folder_path.join(DATABASES[0])).unwrap();
 
     let chara_requested_files = check_chara_files_existence(&extraction_root_path).unwrap();
 
     let extraction_path_clone = extraction_root_path.clone();
     thread::spawn(move || {
-        populate_character_data(&extraction_path_clone, character_database, chara_requested_files, char_name_req_tx);
+        populate_character_data(
+            &extraction_path_clone,
+            character_database,
+            chara_requested_files,
+            char_name_req_tx,
+        );
     })
 }
 
-fn create_text_thread(output_folder_path: &Path, extraction_root_path: &Arc<PathBuf>, char_name_req_rx: Receiver<(i32, i32)>) -> JoinHandle<()> {
+fn create_text_thread(
+    output_folder_path: &Path,
+    extraction_root_path: &Arc<PathBuf>,
+    char_name_req_rx: Receiver<(i32, i32)>,
+    skill_name_req_rx: Receiver<i32>,
+) -> JoinHandle<()> {
     let text_requested_files = check_text_files_existence(&extraction_root_path).unwrap();
 
     let mut text_databases = HashMap::with_capacity(text_requested_files.len());
     for language in text_requested_files.keys() {
         text_databases.insert(
-            *language, 
-            Connection::open(output_folder_path.join(TEXT_DATABASES_ROOT).join(format!("{language}.sqlite"))).unwrap()
+            *language,
+            Connection::open(
+                output_folder_path
+                    .join(TEXT_DATABASES_ROOT)
+                    .join(format!("{language}.sqlite")),
+            )
+            .unwrap(),
         );
     }
 
     let extraction_path_clone = extraction_root_path.clone();
     thread::spawn(move || {
-        populate_text_data(&extraction_path_clone,text_databases, text_requested_files, char_name_req_rx);
+        populate_text_data(
+            &extraction_path_clone,
+            text_databases,
+            text_requested_files,
+            char_name_req_rx,
+            skill_name_req_rx,
+        );
+    })
+}
+
+fn create_skill_thread(
+    output_folder_path: &Path,
+    extraction_root_path: &Arc<PathBuf>,
+    skill_name_req_tx: Sender<i32>,
+) -> JoinHandle<()> {
+    let skill_database = Connection::open(output_folder_path.join(DATABASES[1])).unwrap();
+
+    let skill_requested_files = check_skill_files_existence(&extraction_root_path).unwrap();
+
+    let extraction_path_clone = extraction_root_path.clone();
+    thread::spawn(move || {
+        populate_skill_data(
+            &extraction_path_clone,
+            skill_database,
+            skill_requested_files,
+            skill_name_req_tx,
+        );
     })
 }
 
@@ -136,7 +203,8 @@ fn get_missing_character_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'sta
         Some(files) => {
             let mut missing_rules = Vec::new();
 
-            if files.len() < CHARA_REQUIRED_FILES.len() { // We compute the rules not fullfilled
+            if files.len() < CHARA_REQUIRED_FILES.len() {
+                // We compute the rules not fullfilled
                 for (identifier, rule) in CHARA_REQUIRED_FILES.iter() {
                     if !files.contains_key(identifier) {
                         missing_rules.push(*rule);
@@ -159,8 +227,11 @@ fn get_missing_text_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'static s
             let mut missing_rules = Vec::new();
 
             for (language, rules) in TEXT_REQUIRED_FILES.iter() {
-                if !files.contains_key(language) { // If there's a whole language missing
-                    for &value in rules.values() { missing_rules.push(value); }
+                if !files.contains_key(language) {
+                    // If there's a whole language missing
+                    for &value in rules.values() {
+                        missing_rules.push(value);
+                    }
                     break;
                 }
 
@@ -172,7 +243,30 @@ fn get_missing_text_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'static s
                     }
                 }
             }
-            
+
+            missing_rules
+        }
+        None => {
+            eprintln!("Error while reading the extracted game files.");
+            exit(1);
+        }
+    }
+}
+
+fn get_missing_skill_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'static str> {
+    match check_skill_files_existence(extraction_root_path) {
+        Some(files) => {
+            let mut missing_rules = Vec::new();
+
+            if files.len() < SKILL_REQUIRED_FILES.len() {
+                // We compute the rules not fullfilled
+                for (identifier, rule) in SKILL_REQUIRED_FILES.iter() {
+                    if !files.contains_key(identifier) {
+                        missing_rules.push(*rule);
+                    }
+                }
+            }
+
             missing_rules
         }
         None => {
@@ -185,11 +279,13 @@ fn get_missing_text_rules(extraction_root_path: &Arc<PathBuf>) -> Vec<&'static s
 fn pause() {
     let mut stdout = std::io::stdout();
     print!("Press Enter to continue...");
-    
-    // We must manually flush stdout because print! doesn't 
+
+    // We must manually flush stdout because print! doesn't
     // add a newline, and the prompt might not show up immediately.
     stdout.flush().unwrap();
 
     let mut _unused = String::new();
-    std::io::stdin().read_line(&mut _unused).expect("Failed to read line");
+    std::io::stdin()
+        .read_line(&mut _unused)
+        .expect("Failed to read line");
 }
